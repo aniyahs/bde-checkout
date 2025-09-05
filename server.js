@@ -37,9 +37,9 @@ console.log('Running in', IS_TEST ? 'TEST' : 'LIVE', 'mode');
 const app = express();
 console.log(
   'Webhook secret prefix:',
-  (process.env.STRIPE_WEBHOOK_SECRET || '').slice(0, 8),
-  'len:',
-  (process.env.STRIPE_WEBHOOK_SECRET || '').length
+    (STRIPE_WEBHOOK_SECRET || '').slice(0, 8),
+    'len:',
+    (STRIPE_WEBHOOK_SECRET || '').length
 );
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -208,7 +208,20 @@ app.post('/create-checkout', async (req, res) => {
         recognition_name: company,
         buyer_name,
         buyer_phone
-      }
+      },
+      payment_intent_data: {
+        metadata: {
+        tier,
+        seats: String(seatsCount),
+        covered_fees: wantsFeeCover ? 'true' : 'false',
+        donation: donationCents > 0 ? 'true' : 'false',
+        donation_amount: donationCents > 0 ? (donationCents/100).toFixed(2) : '0',
+        company,
+        recognition_name: company,
+        buyer_name,
+        buyer_phone
+        }
+    }
     });
 
     return res.redirect(303, session.url);
