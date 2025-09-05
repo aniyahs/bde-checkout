@@ -239,9 +239,9 @@ export async function handleCheckoutCompleted(session) {
   }
 
   console.log(`✅ Recorded ${TIER_LABEL[tier] || tier} | seats: ${seats} | amount: $${amountTotal} | order: ${orderId}`);
-/*
+
   // Log to Google Sheets
-try {
+
   await appendToSheet({
     orderId,
     buyerName: name,
@@ -255,24 +255,6 @@ try {
     company: meta.company || '',
     recognition: meta.recognition_name || meta.company || ''
   });
-} catch (e) {
-  console.error('Sheets append error:', e.message);
-}
-
-// Also log to local CSV as a backup (same object signature)
-appendCsvRow({
-  orderId,
-  buyerName: name,
-  buyerEmail: email,
-  buyerPhone: phone,
-  tier,
-  seats,
-  amount: amountTotal,
-  coveredFees,
-  donation: session.metadata?.donation_amount || (isDonation ? '1' : '0'),
-  company: meta.company || '',
-  recognition: meta.recognition_name || meta.company || ''
-}); */
 
 }
 

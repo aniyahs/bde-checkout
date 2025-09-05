@@ -1,54 +1,48 @@
+// sheets.js
 import { google } from 'googleapis';
 
-let sheetsClient = null;
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-async function getSheetsClient() {
-  if (sheetsClient) return sheetsClient;
-  const auth = new google.auth.GoogleAuth({
-    keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-  });
-  const authClient = await auth.getClient();
-  sheetsClient = google.sheets({ version: 'v4', auth: authClient });
-  return sheetsClient;
+function getAuth() {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const key = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  if (!email || !key) throw new Error('Google service account env vars missing.');
+  return new google.auth.JWT(email, null, key, SCOPES);
 }
 
-// Append one row in fixed header order
-export async function appendToSheet({
-  orderId,
-  buyerName,
-  buyerEmail,
-  buyerPhone,
-  tier,
-  seats,
-  amount,
-  coveredFees,
-  donation,
-  company,
-  recognition
-}) {
-  const sheets = await getSheetsClient();
-  const timestamp = new Date().toISOString();
+function getClient() {
+  const auth = getAuth();
+  return google.sheets({ version: 'v4', auth });
+}
 
-  const row = [
-    timestamp,
-    orderId,
-    buyerName || '',
-    buyerEmail || '',
-    buyerPhone || '',
-    tier,
-    String(seats),
-    String(amount),
-    coveredFees ? 'Y' : 'N',
-    donation,
-    company || '',
-    recognition || ''
-  ];
+export async function appendToSheet(row) {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+  const tabName = process.env.GOOGLE_SHEETS_TAB_NAME || 'Orders';
+  if (!spreadsheetId) throw new Error('GOOGLE_SHEETS_ID not set');
+
+  const sheets = getClient();
+
+  // Map your row object to columns (adjust headers/order as you like)
+  const values = [[
+    row.orderId,
+    row.buyerName,
+    row.buyerEmail,
+    row.buyerPhone,
+    row.tier,
+    row.seats,
+    row.amount,         // string like "200.00"
+    row.coveredFees ? 'TRUE' : 'FALSE',
+    row.donation,       // donation amount string or "0"
+    row.company,
+    row.recognition,
+    new Date().toISOString(),
+  ]];
 
   await sheets.spreadsheets.values.append({
-    spreadsheetId: process.env.SHEETS_SPREADSHEET_ID,
-    range: `${process.env.SHEETS_TAB || 'Orders'}!A:M`, // 13 columns
+    spreadsheetId,
+    range: `${tabName}!A:Z`,
     valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [row] }
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values }
   });
 }
