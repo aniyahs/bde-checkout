@@ -3,6 +3,37 @@ import express from 'express';
 import Stripe from 'stripe';
 import { handleCheckoutCompleted, handlePaymentIntentSucceeded, handleRefunded } from './handlers.js';
 
+// --- Mode + env-driven config (ADD THIS) ---
+const stripeKey = process.env.STRIPE_SECRET_KEY || '';
+const IS_TEST = stripeKey.startsWith('sk_test_');
+
+// Price IDs come from env (no hardcoding)
+const PRICE_BY_TIER = IS_TEST ? {
+  gold:   process.env.TEST_PRICE_GOLD,
+  silver: process.env.TEST_PRICE_SILVER,
+  bronze: process.env.TEST_PRICE_BRONZE,
+  ga:     process.env.TEST_PRICE_GA,
+} : {
+  gold:   process.env.LIVE_PRICE_GOLD,
+  silver: process.env.LIVE_PRICE_SILVER,
+  bronze: process.env.LIVE_PRICE_BRONZE,
+  ga:     process.env.LIVE_PRICE_GA,
+};
+
+// Ensure all price IDs are present for this mode
+for (const [tier, id] of Object.entries(PRICE_BY_TIER)) {
+  if (!id) {
+    throw new Error(`Missing price id for ${tier} in ${IS_TEST ? 'TEST' : 'LIVE'} mode`);
+  }
+}
+
+// Webhook secret per environment
+const STRIPE_WEBHOOK_SECRET = IS_TEST
+  ? process.env.STRIPE_WEBHOOK_SECRET_TEST
+  : process.env.STRIPE_WEBHOOK_SECRET_LIVE;
+
+console.log('Running in', IS_TEST ? 'TEST' : 'LIVE', 'mode');
+
 const app = express();
 console.log(
   'Webhook secret prefix:',
@@ -25,7 +56,7 @@ app.post(
       event = stripe.webhooks.constructEvent(
         req.body,                              // ← Buffer, not parsed JSON
         sig,
-        process.env.STRIPE_WEBHOOK_SECRET
+        STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
       console.error('❌ Webhook signature verification failed:', err.message);
@@ -60,13 +91,7 @@ app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));                      // any JSON APIs
 
 // ===== Constants =====
-const PRICE_BY_TIER = {
-  gold:   'price_1S2wwmQeRQoS8pRKWqJOdzWn',
-  silver: 'price_1S2wxnQeRQoS8pRKmVewQmwt',
-  bronze: 'price_1S2wynQeRQoS8pRKhJ3PozBM',
-  ga:     'price_1S2wzxQeRQoS8pRKP8uKu5v7',
-  // support_family: 'price_XXXXXXXXXXXXXXX'
-};
+
 const SEATS_BY_TIER = { gold: 8, silver: 8, bronze: 8, ga: 1, support_family: 8 };
 
 function computeFeeCover(baseCents, pct = Number(process.env.FEE_PCT || 0.029), fixed = Number(process.env.FEE_FIXED_CENTS || 30)) {
@@ -189,7 +214,7 @@ app.post('/create-checkout', async (req, res) => {
     return res.redirect(303, session.url);
   } catch (err) {
     console.error('Checkout error:', err.message, { body: req.body });
-    return res.redirect(302, process.env.CANCEL_URL || '/tickets');
+    return res.status(500).send(`Checkout error: ${err.message}`);
   }
 });
 
