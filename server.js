@@ -1,47 +1,63 @@
 import 'dotenv/config';
 import express from 'express';
 import Stripe from 'stripe';
-import { handleCheckoutCompleted, handlePaymentIntentSucceeded, handleRefunded } from './handlers.js';
+import {
+  handleCheckoutCompleted,
+  handlePaymentIntentSucceeded,
+  handleRefunded
+} from './handlers.js';
 
-// --- Stripe key & mode ---
-const stripeKey = process.env.STRIPE_SECRET_KEY || '';
+// ---------- Stripe key & mode ----------
+const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || '';
+const stripeKey = stripeKeyRaw.trim();
 const IS_TEST = stripeKey.startsWith('sk_test_');
 
-// --- Donation tracker config ---
-const CAMPAIGN_KEY   = process.env.CAMPAIGN_KEY   || 'gala2025';
-const CAMPAIGN_START = process.env.CAMPAIGN_START || '2025-01-01T00:00:00Z'; 
-const ALLOW_ORIGIN   = process.env.ALLOW_ORIGIN   || 'https://gala.bestdayever.info';
-
-// Price IDs by mode (unchanged idea)
-const PRICE_BY_TIER = IS_TEST ? {
-  gold:   process.env.TEST_PRICE_GOLD,
-  silver: process.env.TEST_PRICE_SILVER,
-  bronze: process.env.TEST_PRICE_BRONZE,
-  ga:     process.env.TEST_PRICE_GA,
-} : {
-  platinum: process.env.LIVE_PRICE_PLATINUM,
-  gold:   process.env.LIVE_PRICE_GOLD,
-  silver: process.env.LIVE_PRICE_SILVER,
-  bronze: process.env.LIVE_PRICE_BRONZE,
-};
-
-// Ensure price IDs exist
-for (const [tier, id] of Object.entries(PRICE_BY_TIER)) {
-  if (!id) throw new Error(`Missing price id for ${tier} in ${IS_TEST ? 'TEST' : 'LIVE'} mode`);
+if (!stripeKey || !(stripeKey.startsWith('sk_live_') || stripeKey.startsWith('sk_test_'))) {
+  throw new Error('STRIPE_SECRET_KEY is missing or malformed (expected sk_live_… or sk_test_…).');
 }
 
-// Webhook secret per env
+const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' });
+
+// Fail boot if you must be live but a test key is present
+if (process.env.NODE_ENV === 'production' && process.env.FORCE_LIVE === '1' && IS_TEST) {
+  throw new Error('FORCE_LIVE=1 but STRIPE_SECRET_KEY is a TEST key. Use sk_live_…');
+}
+
+// Webhook secret per env (NOTE the _LIVE name)
 const STRIPE_WEBHOOK_SECRET = IS_TEST
   ? process.env.STRIPE_WEBHOOK_SECRET_TEST
-  : process.env.STRIPE_WEBHOOK_SECRET;
+  : process.env.STRIPE_WEBHOOK_SECRET_LIVE;
 
 console.log('Running in', IS_TEST ? 'TEST' : 'LIVE', 'mode');
 console.log('Webhook secret prefix:', (STRIPE_WEBHOOK_SECRET || '').slice(0, 8), 'len:', (STRIPE_WEBHOOK_SECRET || '').length);
 
-const app = express();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+// ---------- Donation tracker config ----------
+const CAMPAIGN_KEY   = process.env.CAMPAIGN_KEY   || 'gala2025';
+const CAMPAIGN_START = process.env.CAMPAIGN_START || '2025-01-01T00:00:00Z';
+const ALLOW_ORIGIN   = process.env.ALLOW_ORIGIN   || 'https://gala.bestdayever.info';
 
-// ===== Stripe webhook FIRST (raw body) =====
+// Price IDs by mode (Platinum instead of GA)
+const PRICE_BY_TIER = IS_TEST ? {
+  platinum: process.env.TEST_PRICE_PLATINUM,
+  gold:     process.env.TEST_PRICE_GOLD,
+  silver:   process.env.TEST_PRICE_SILVER,
+  bronze:   process.env.TEST_PRICE_BRONZE,
+} : {
+  platinum: process.env.LIVE_PRICE_PLATINUM,
+  gold:     process.env.LIVE_PRICE_GOLD,
+  silver:   process.env.LIVE_PRICE_SILVER,
+  bronze:   process.env.LIVE_PRICE_BRONZE,
+};
+
+// Ensure price IDs exist for the current mode
+for (const [tier, id] of Object.entries(PRICE_BY_TIER)) {
+  if (!id) throw new Error(`Missing price id for "${tier}" in ${IS_TEST ? 'TEST' : 'LIVE'} mode`);
+}
+
+// ---------- App ----------
+const app = express();
+
+// ---------- Stripe webhook FIRST (raw body) ----------
 app.post(
   '/stripe/webhook',
   express.raw({ type: 'application/json' }),
@@ -80,12 +96,29 @@ app.post(
   }
 );
 
-// ===== Other middleware AFTER webhook =====
+// ---------- Other middleware AFTER webhook ----------
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 
-// ===== Helpers =====
-const SEATS_BY_TIER = { platinum: 16, gold: 8, silver: 8, bronze: 8};
+// ---------- Debug routes ----------
+app.get('/debug/mode', (req, res) => {
+  res.json({
+    mode: stripeKey.startsWith('sk_live_') ? 'LIVE' : 'TEST',
+    keyPrefix: stripeKey.slice(0, 7) + '…',
+  });
+});
+
+app.get('/debug/stripe', async (req, res) => {
+  try {
+    const acct = await stripe.accounts.retrieve();
+    res.json({ ok: true, account: acct.id, livemode: acct.livemode });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- Helpers ----------
+const SEATS_BY_TIER = { platinum: 16, gold: 8, silver: 8, bronze: 8 };
 
 function computeFeeCover(baseCents, pct = Number(process.env.FEE_PCT || 0.029), fixed = Number(process.env.FEE_FIXED_CENTS || 30)) {
   const gross = (baseCents + fixed) / (1 - pct);
@@ -95,13 +128,13 @@ function computeFeeCover(baseCents, pct = Number(process.env.FEE_PCT || 0.029), 
 function normalizeTier(input) {
   const v = String(input || '').toLowerCase();
   if (v.includes('platinum') || v.includes('plat')) return 'platinum';
-  if (v.includes('gold'))   return 'gold';
-  if (v.includes('silver')) return 'silver';
-  if (v.includes('bronze')) return 'bronze';
+  if (v.includes('gold'))     return 'gold';
+  if (v.includes('silver'))   return 'silver';
+  if (v.includes('bronze'))   return 'bronze';
   return '';
 }
 
-// ===== Create Checkout =====
+// ---------- Create Checkout ----------
 app.post('/create-checkout', async (req, res) => {
   try {
     const {
@@ -201,7 +234,7 @@ app.post('/create-checkout', async (req, res) => {
         recognition_name: company,
         buyer_name,
         buyer_phone,
-        // 👇 NEW for the tracker
+        // Tracker
         campaign: CAMPAIGN_KEY,
         counts_for_goal: 'true',
       },
@@ -216,7 +249,7 @@ app.post('/create-checkout', async (req, res) => {
           recognition_name: company,
           buyer_name,
           buyer_phone,
-          // 👇 NEW (PI search reads this)
+          // Tracker (PI search reads this)
           campaign: CAMPAIGN_KEY,
           counts_for_goal: 'true',
         }
@@ -230,7 +263,7 @@ app.post('/create-checkout', async (req, res) => {
   }
 });
 
-// --- Admin CSV download (unchanged) ---
+// ---------- Admin CSV download ----------
 app.get('/admin/orders.csv', (req, res) => {
   const token = req.query.token || req.headers['x-admin-token'];
   if (!token || token !== process.env.ADMIN_TOKEN) return res.status(401).send('Unauthorized');
@@ -242,17 +275,16 @@ app.get('/admin/orders.csv', (req, res) => {
   require('fs').createReadStream(filePath).pipe(res);
 });
 
-// ===== Donation tracker API =====
+// ---------- Donation tracker API ----------
 let _raisedCache = { at: 0, data: null };
 
 app.get('/api/raised', async (req, res) => {
   try {
-    // Allow gala site to call this
     res.set('Access-Control-Allow-Origin', ALLOW_ORIGIN);
 
-    // 60s cache
+    const noCache = req.query.nocache === '1';
     const cacheMs = 60_000;
-    if (_raisedCache.data && Date.now() - _raisedCache.at < cacheMs) {
+    if (!noCache && _raisedCache.data && Date.now() - _raisedCache.at < cacheMs) {
       return res.json(_raisedCache.data);
     }
 
@@ -305,8 +337,9 @@ app.get('/api/raised', async (req, res) => {
   }
 });
 
-// Health
+// ---------- Health ----------
 app.get('/', (_, res) => res.send('OK'));
 
+// ---------- Listen ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Listening on ${PORT}`));
