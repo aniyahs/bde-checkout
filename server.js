@@ -9,7 +9,7 @@ const IS_TEST = stripeKey.startsWith('sk_test_');
 
 // --- Donation tracker config ---
 const CAMPAIGN_KEY   = process.env.CAMPAIGN_KEY   || 'gala2025';
-const CAMPAIGN_START = process.env.CAMPAIGN_START || '2025-01-01T00:00:00Z'; // ISO datetime
+const CAMPAIGN_START = process.env.CAMPAIGN_START || '2025-01-01T00:00:00Z'; 
 const ALLOW_ORIGIN   = process.env.ALLOW_ORIGIN   || 'https://gala.bestdayever.info';
 
 // Price IDs by mode (unchanged idea)
@@ -19,10 +19,10 @@ const PRICE_BY_TIER = IS_TEST ? {
   bronze: process.env.TEST_PRICE_BRONZE,
   ga:     process.env.TEST_PRICE_GA,
 } : {
+  platinum: process.env.LIVE_PRICE_PLATINUM,
   gold:   process.env.LIVE_PRICE_GOLD,
   silver: process.env.LIVE_PRICE_SILVER,
   bronze: process.env.LIVE_PRICE_BRONZE,
-  ga:     process.env.LIVE_PRICE_GA,
 };
 
 // Ensure price IDs exist
