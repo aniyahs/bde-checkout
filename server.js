@@ -85,7 +85,7 @@ app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 
 // ===== Helpers =====
-const SEATS_BY_TIER = { gold: 8, silver: 8, bronze: 8, ga: 1, support_family: 8 };
+const SEATS_BY_TIER = { platinum: 16, gold: 8, silver: 8, bronze: 8};
 
 function computeFeeCover(baseCents, pct = Number(process.env.FEE_PCT || 0.029), fixed = Number(process.env.FEE_FIXED_CENTS || 30)) {
   const gross = (baseCents + fixed) / (1 - pct);
@@ -94,11 +94,10 @@ function computeFeeCover(baseCents, pct = Number(process.env.FEE_PCT || 0.029), 
 
 function normalizeTier(input) {
   const v = String(input || '').toLowerCase();
+  if (v.includes('platinum') || v.includes('plat')) return 'platinum';
   if (v.includes('gold'))   return 'gold';
   if (v.includes('silver')) return 'silver';
   if (v.includes('bronze')) return 'bronze';
-  if (v.includes('general') || v.includes('ga')) return 'ga';
-  if (v.includes('support')) return 'support_family';
   return '';
 }
 

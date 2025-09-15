@@ -10,6 +10,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Map your tiers → human labels (for emails/CRM)
 const TIER_LABEL = {
+  platinum: 'Platinum Sponsor',
   gold: 'Gold Sponsor',
   silver: 'Silver Sponsor',
   bronze: 'Bronze Sponsor',
@@ -263,7 +264,7 @@ export async function handleCheckoutCompleted(session) {
           recognition_name: meta.recognition_name || ''
         });
 
-        if (['gold','silver','bronze','support_family'].includes(tier)) {
+        if (['platinum','gold','silver','bronze','support_family'].includes(tier)) {
           await addGHLTag(contactId, 'Gala - Table Buyer');
         } else {
           await addGHLTag(contactId, 'Gala - GA');
