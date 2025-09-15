@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { appendToSheet } from './sheets.js';
 import fetch from 'node-fetch';
+import { sendSponsorEmail } from './mailer.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -255,6 +256,28 @@ export async function handleCheckoutCompleted(session) {
     company: meta.company || '',
     recognition: meta.recognition_name || meta.company || ''
   });
+
+    try {
+    const pi = await stripe.paymentIntents.retrieve(session.payment_intent, {
+      expand: ['latest_charge'],
+    });
+    const receiptUrl = pi.latest_charge?.receipt_url || null;
+
+    if (email) {
+      await sendSponsorEmail({
+        to: email,
+        buyerName: name,
+        tier: TIER_LABEL[tier] || tier,
+        seats,
+        amountTotal,
+        coveredFees,
+        receiptUrl,
+        sponsorCompany: meta.company || '',
+      });
+    }
+  } catch (err) {
+    console.error('❌ Error sending confirmation email:', err);
+  }
 
 }
 
