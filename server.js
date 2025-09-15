@@ -33,7 +33,7 @@ for (const [tier, id] of Object.entries(PRICE_BY_TIER)) {
 // Webhook secret per env
 const STRIPE_WEBHOOK_SECRET = IS_TEST
   ? process.env.STRIPE_WEBHOOK_SECRET_TEST
-  : process.env.STRIPE_WEBHOOK_SECRET_LIVE;
+  : process.env.STRIPE_WEBHOOK_SECRET;
 
 console.log('Running in', IS_TEST ? 'TEST' : 'LIVE', 'mode');
 console.log('Webhook secret prefix:', (STRIPE_WEBHOOK_SECRET || '').slice(0, 8), 'len:', (STRIPE_WEBHOOK_SECRET || '').length);
