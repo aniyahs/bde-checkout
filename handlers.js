@@ -207,63 +207,18 @@ export async function handleCheckoutCompleted(session) {
   const isDonation  = meta.donation === 'true';
   const orderId = session.id;
 
-  // 1) Upsert contact in HighLevel
-  const contact = await upsertGHLContact({
-    email,
-    name,
-    phone,
-    company: meta.company,
-    tags: ['Gala - Paid', `Tier - ${TIER_LABEL[tier] || tier}`]
-  });
-
-  const contactId = contact?.contact?.id || contact?.id;
-  if (contactId) {
-    // 2) Update custom fields (try by name → fallback by ID)
-    await setGHLFields(contactId, {
-      ticket_tier: tier,
-      seats: String(seats),
-      amount_paid: amountTotal,
-      covered_fees: coveredFees ? 'true' : 'false',
-      donation: isDonation ? 'true' : 'false',
-      order_id: orderId,
-      recognition_name: meta.recognition_name || ''
-    });
-
-    // Optional: tag sponsors vs GA
-    if (['gold','silver','bronze','support_family'].includes(tier)) {
-      await addGHLTag(contactId, 'Gala - Table Buyer');
-    } else {
-      await addGHLTag(contactId, 'Gala - GA');
-    }
-  } else {
-    console.error('❌ No contactId returned from GHL upsert. Payload:', { email, name });
+  // --- 0) Get Stripe receipt URL up front (for the email)
+  let receiptUrl = null;
+  try {
+    const pi = await stripe.paymentIntents.retrieve(session.payment_intent, { expand: ['latest_charge'] });
+    receiptUrl = pi.latest_charge?.receipt_url || null;
+  } catch (e) {
+    console.warn('Could not fetch receipt_url:', e?.message || e);
   }
 
-  console.log(`✅ Recorded ${TIER_LABEL[tier] || tier} | seats: ${seats} | amount: $${amountTotal} | order: ${orderId}`);
-
-  // Log to Google Sheets
-
-  await appendToSheet({
-    orderId,
-    buyerName: name,
-    buyerEmail: email,
-    buyerPhone: phone,
-    tier,
-    seats,
-    amount: amountTotal,
-    coveredFees,
-    donation: session.metadata?.donation_amount || (isDonation ? '1' : '0'),
-    company: meta.company || '',
-    recognition: meta.recognition_name || meta.company || ''
-  });
-
+  // --- 1) EMAIL FIRST (non-blocking for everything else)
+  if (email) {
     try {
-    const pi = await stripe.paymentIntents.retrieve(session.payment_intent, {
-      expand: ['latest_charge'],
-    });
-    const receiptUrl = pi.latest_charge?.receipt_url || null;
-
-    if (email) {
       await sendSponsorEmail({
         to: email,
         buyerName: name,
@@ -274,13 +229,95 @@ export async function handleCheckoutCompleted(session) {
         receiptUrl,
         sponsorCompany: meta.company || '',
       });
+      console.log('✅ Confirmation email sent to', email);
+    } catch (err) {
+      console.error('❌ Error sending confirmation email:', err);
     }
-  } catch (err) {
-    console.error('❌ Error sending confirmation email:', err);
+  } else {
+    console.warn('⚠️ No buyer email on session; skipping confirmation email');
   }
 
-}
+  // --- 2) GHL upsert + fields/tag (non-blocking)
+  try {
+    const canUseGHL = !!process.env.GHL_API_KEY && !!process.env.GHL_LOCATION_ID;
+    if (!canUseGHL) {
+      console.warn('⚠️ GHL credentials missing; skipping CRM upsert');
+    } else {
+      const contact = await upsertGHLContact({
+        email,
+        name,
+        phone,
+        company: meta.company,
+        tags: ['Gala - Paid', `Tier - ${TIER_LABEL[tier] || tier}`]
+      });
 
+      const contactId = contact?.contact?.id || contact?.id;
+      if (contactId) {
+        await setGHLFields(contactId, {
+          ticket_tier: tier,
+          seats: String(seats),
+          amount_paid: amountTotal,
+          covered_fees: coveredFees ? 'true' : 'false',
+          donation: isDonation ? 'true' : 'false',
+          order_id: orderId,
+          recognition_name: meta.recognition_name || ''
+        });
+
+        if (['gold','silver','bronze','support_family'].includes(tier)) {
+          await addGHLTag(contactId, 'Gala - Table Buyer');
+        } else {
+          await addGHLTag(contactId, 'Gala - GA');
+        }
+      } else {
+        console.error('❌ No contactId returned from GHL upsert. Payload:', { email, name });
+      }
+    }
+  } catch (e) {
+    console.error('GHL step (non-blocking) error:', e);
+  }
+
+  // --- 3) Sheets append OR CSV backup (non-blocking)
+  try {
+    const hasSheetsCreds =
+      !!process.env.GOOGLE_SHEETS_ID &&
+      !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
+      !!process.env.GOOGLE_PRIVATE_KEY;
+
+    if (hasSheetsCreds) {
+      await appendToSheet({
+        orderId,
+        buyerName: name,
+        buyerEmail: email,
+        buyerPhone: phone,
+        tier,
+        seats,
+        amount: amountTotal,
+        coveredFees,
+        donation: session.metadata?.donation_amount || (isDonation ? '1' : '0'),
+        company: meta.company || '',
+        recognition: meta.recognition_name || meta.company || ''
+      });
+    } else {
+      appendCsvRow({
+        orderId,
+        buyerName: name,
+        buyerEmail: email,
+        buyerPhone: phone,
+        tier,
+        seats,
+        amount: amountTotal,
+        coveredFees,
+        donation: session.metadata?.donation_amount || (isDonation ? '1' : '0'),
+        company: meta.company || '',
+        recognition: meta.recognition_name || meta.company || ''
+      });
+    }
+  } catch (e) {
+    console.error('Sheets/CSV step (non-blocking) error:', e);
+  }
+
+  console.log(`✅ Recorded ${TIER_LABEL[tier] || tier} | seats: ${seats} | amount: $${amountTotal} | order: ${orderId}`);
+}
 
 // Backup handler for PI succeeded (in case Checkout event missed)
 export async function handlePaymentIntentSucceeded(pi) {
