@@ -34,7 +34,7 @@ export async function sendSponsorEmail({
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#0f172a;">
     <h2 style="margin:0 0 8px;">Thank you${firstName ? `, ${firstName}` : ''}!</h2>
     <p style="margin:0 0 16px;">
-      We’re honored to have your support${sponsorCompany ? ` at <strong>${sponsorCompany}</strong>` : ''}.
+      We’re honored to have your support${sponsorCompany ? ` at <strong>${sponsorCompany}</strong>` : ''}. From the bottom of our hearts, thank you for being part of this magical evening of giving. Your generosity truly changes lives.
     </p>
 
     <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:16px 0;">
